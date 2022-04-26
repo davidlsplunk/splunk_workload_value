@@ -1,0 +1,199 @@
+<form>
+  <label>Splunk Workload Value</label>
+  <fieldset submitButton="false">
+    <input type="time" token="svc_time">
+      <label>SVC Range</label>
+      <default>
+        <earliest>-7d@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <chart>
+        <title>SVC by Consumer</title>
+        <search>
+          <query>index=summary source="splunk-svc-consumer" svc_usage=* 
+| fields svc_usage svc_consumer svc_consumption_score search_type search_app search_label search_user 
+| dedup keepempty=t _time svc_consumer search_type search_app search_label search_user svc_usage 
+| bin span=1h _time 
+| eval ingestion=if(svc_consumer="data services",svc_usage,0), search=if(svc_consumer="search",svc_usage,0) 
+| stats sum(ingestion) as ingest sum(search) as search by _time
+| timechart span=1d avg(ingest) as ingest avg(search) as search 
+| eval total=round(ingest+search,2), ingest=round(ingest,2), search=round(search,2)</query>
+          <earliest>$svc_time.earliest$</earliest>
+          <latest>$svc_time.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>SVC by Search</title>
+        <search>
+          <query>index=summary source="splunk-svc-consumer" svc_usage=*
+      | fields svc_usage svc_consumer svc_consumption_score search_type search_app search_label search_user
+      | dedup keepempty=t _time svc_consumer search_type search_app search_label search_user svc_usage | eval search_type=if(search_type=="","other",search_type)
+            | eval search_type=if(isnull(search_type),"other",search_type)
+            | search svc_consumer="search"
+            | timechart span=1h sum(svc_usage) by search_type</query>
+          <earliest>$svc_time.earliest$</earliest>
+          <latest>$svc_time.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <input type="dropdown" token="cur_time" searchWhenChanged="true">
+        <label>Current Search Statistics</label>
+        <fieldForLabel>Date</fieldForLabel>
+        <fieldForValue>Date</fieldForValue>
+        <search>
+          <query>| inputlookup lkp_searchType_stats.csv 
+| eval Date=strftime(_time,"%m/%d/%Y")
+| stats count by Date, StartDate, EndDate
+| sort Date</query>
+        </search>
+        <change>
+            <set token="cur_time_earliest_token">$row.StartDate$</set>
+            <set token="cur_time_latest_token">$row.EndDate$</set>
+        </change>
+      </input>
+      <input type="dropdown" token="comp_time" searchWhenChanged="true">
+        <label>Compare Search Statistics</label>
+        <fieldForLabel>Date</fieldForLabel>
+        <fieldForValue>Date</fieldForValue>
+        <search>
+          <query>| inputlookup lkp_searchType_stats.csv 
+| eval Date=strftime(_time,"%m/%d/%Y")
+| stats count by Date, StartDate, EndDate
+| sort Date</query>
+        </search>
+        <change>
+          <set token="comp_time_earliest_token">$row.StartDate$</set>
+          <set token="comp_time_latest_token">$row.EndDate$</set>
+        </change>
+      </input>
+      <input type="checkbox" token="compare_token" searchWhenChanged="true">
+        <label>Compare</label>
+        <change>
+          <condition label="Yes">
+            <set token="cur_time_earliest">$cur_time_earliest_token$</set>
+            <set token="cur_time_latest">$cur_time_latest_token$</set>
+            <set token="comp_time_earliest">$comp_time_earliest_token$</set>
+            <set token="comp_time_latest">$comp_time_latest_token$</set>
+            <set token="show_compare">true</set>
+            <unset token="form.compare_token"></unset>
+            <set token="form.compare_token">yes</set>
+          </condition>
+          <condition label="No">
+            <set token="cur_time_earliest">$cur_time_earliest_token$</set>
+            <set token="cur_time_latest">$cur_time_latest_token$</set>
+            <set token="comp_time_earliest">$comp_time_earliest_token$</set>
+            <set token="comp_time_latest">$comp_time_latest_token$</set>
+            <unset token="show_compare"></unset>
+            <unset token="form.compare_token"></unset>
+            <set token="form.compare_token">no</set>
+          </condition>
+        </change>
+        <choice value="yes">Yes</choice>
+        <choice value="no">No</choice>
+        <delimiter> </delimiter>
+      </input>
+    </panel>
+    <panel depends="$show_compare$">
+      <single>
+        <title>SVC Change</title>
+        <search>
+          <query>index=summary source="splunk-svc-consumer" svc_usage=* earliest=$cur_time_earliest$ latest=$cur_time_latest$
+| fields svc_usage svc_consumer svc_consumption_score search_type search_app search_label search_user 
+| dedup keepempty=t _time svc_consumer search_type search_app search_label search_user svc_usage 
+| bin span=1h _time 
+| eval ingestion=if(svc_consumer="data services",svc_usage,0), search=if(svc_consumer="search",svc_usage,0) 
+| stats sum(ingestion) as ingest sum(search) as search by _time
+| bin span=1d _time
+| stats avg(ingest) as ingest avg(search) as search by _time
+| eval cur_total=round(ingest+search,2)
+| table cur_total
+| appendcols [| search index=summary source="splunk-svc-consumer" svc_usage=* earliest=$comp_time_earliest$ latest=$comp_time_latest$
+| fields svc_usage svc_consumer svc_consumption_score search_type search_app search_label search_user 
+| dedup keepempty=t _time svc_consumer search_type search_app search_label search_user svc_usage 
+| bin span=1h _time 
+| eval ingestion=if(svc_consumer="data services",svc_usage,0), search=if(svc_consumer="search",svc_usage,0) 
+| stats sum(ingestion) as ingest sum(search) as search by _time
+| bin span=1d _time
+| stats avg(ingest) as ingest avg(search) as search by _time
+| eval comp_total=round(ingest+search,2)
+| table comp_total]
+| eval Diff=comp_total-cur_total
+| table Diff</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel depends="$show_compare$">
+      <single>
+        <title>Runtime Change (in Minutes)</title>
+        <search>
+          <query>| inputlookup lkp_searchType_stats.csv 
+| search StartDate="$cur_time_earliest$" EndDate="$cur_time_latest$" 
+| stats sum("Cumulative Runtime") as cur_runtime 
+| appendcols 
+    [| inputlookup lkp_searchType_stats.csv 
+    | search StartDate="$comp_time_earliest$" EndDate="$comp_time_latest$" 
+    | stats sum("Cumulative Runtime") as comp_runtime] 
+| eval diff=round((comp_runtime-cur_runtime)/60,2)
+| fields diff</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+  </row>
+  <row depends="$compare_token$">
+    <panel>
+      <table>
+        <title>Current Search Type - $cur_time$</title>
+        <search>
+          <query>| inputlookup lkp_searchType_stats.csv
+| eval StartDate=strftime(_time,"%m/%d/%Y")
+| search StartDate=$cur_time$
+| table "Search Type", "Search Count", "Median Runtime", "Cumulative Runtime"
+| sort "Search Type"</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Compare Search Type - $comp_time$</title>
+        <search>
+          <query>| inputlookup lkp_searchType_stats.csv
+| eval StartDate=strftime(_time,"%m/%d/%Y")
+| search StartDate=$comp_time$
+| table "Search Type", "Search Count", "Median Runtime", "Cumulative Runtime"
+| sort "Search Type"</query>
+          <earliest>-15m@m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+</form>
